@@ -2,6 +2,8 @@ import streamlit as st
 from datetime import date
 from generate_pdf import create_pdf_report
 import os
+import pandas as pd
+import altair as alt
 
 # --- Page Configuration ---
 st.set_page_config(
@@ -28,6 +30,39 @@ st.markdown("""
 st.title("MyPCOS AI – Powered by Clinics Northside™")
 st.markdown("A personalized diagnostic & care tool for PCOS reversal.")
 st.divider()
+
+# --- Navigation Tabs ---
+tab = st.sidebar.radio("Select Tab", ["📝 New Report", "📈 Monitor Progress"])
+
+# --- CSV Persistence Setup ---
+DATA_FILE = "progress_tracker.csv"
+if not os.path.exists(DATA_FILE):
+    pd.DataFrame(columns=["Date", "Name", "Weight", "BMI", "Cycle Length", "HOMA-IR", "TSH"]).to_csv(DATA_FILE, index=False)
+
+if tab == "📈 Monitor Progress":
+    st.header("📈 Track PCOS Progress Over Time")
+
+    # Load data
+    df = pd.read_csv(DATA_FILE)
+    patient_name = st.selectbox("Select patient name to view trends:", df["Name"].unique())
+    filtered = df[df["Name"] == patient_name]
+
+    if not filtered.empty:
+        st.subheader("📊 Weight Trend")
+        st.line_chart(filtered.set_index("Date")["Weight"])
+
+        st.subheader("📊 BMI Trend")
+        st.line_chart(filtered.set_index("Date")["BMI"])
+
+        st.subheader("📊 HOMA-IR Trend")
+        st.line_chart(filtered.set_index("Date")["HOMA-IR"])
+
+        st.subheader("📊 TSH Trend")
+        st.line_chart(filtered.set_index("Date")["TSH"])
+    else:
+        st.info("No data found for this patient yet.")
+
+    st.stop()
 
 # --- Patient Details Sidebar ---
 with st.sidebar:
@@ -84,110 +119,19 @@ with col3:
 
 st.divider()
 
-# --- Payment Wall Before Analysis ---
-st.subheader("📋 Diagnostic Summary")
-
-if "payment_success" not in st.session_state:
-    st.session_state["payment_success"] = False
-
-if not st.session_state["payment_success"]:
-    st.info("🔒 Lab analysis and downloadable report are available after payment of ₹299.")
-
-    if st.button("🔍 Analyze & Download Report (Rs. 299)"):
-        st.markdown("""
-        ### 💳 Razorpay Secure Payment
-        Please complete payment of ₹299 using the link below:
-
-        👉 [Pay ₹299 Now](https://razorpay.me/@clinicsnorthside)
-        """, unsafe_allow_html=True)
-        st.markdown("> Once paid, check the confirmation box below.")
-
-    paid_confirm = st.checkbox("✅ I have completed the ₹299 payment")
-
-    if paid_confirm:
-        st.session_state["payment_success"] = True
-        st.success("✅ Payment confirmed! Analyzing your report...")
-        st.experimental_rerun()
-
-    st.stop()
-
-# --- Diagnosis ---
-criteria = {
-    "Oligo/anovulation": (irregular_cycles == "Yes" or cycle_frequency < 9),
-    "Hyperandrogenism": (acne or hirsutism or alopecia or total_testosterone > 50 or dheas > 350),
-    "Polycystic ovaries": (pcos_ovaries == "Yes")
-}
-num_positive = sum(criteria.values())
-
-if num_positive >= 2:
-    st.success("✅ **PCOS Likely (meets Rotterdam Criteria)**")
-    if all(criteria.values()):
-        phenotype = "Phenotype A"
-    elif criteria["Oligo/anovulation"] and criteria["Hyperandrogenism"]:
-        phenotype = "Phenotype B"
-    elif criteria["Hyperandrogenism"] and criteria["Polycystic ovaries"]:
-        phenotype = "Phenotype C"
-    elif criteria["Oligo/anovulation"] and criteria["Polycystic ovaries"]:
-        phenotype = "Phenotype D"
-    else:
-        phenotype = "Unclassified"
-    st.write(f"### 📌 PCOS Phenotype: **{phenotype}**")
-else:
-    phenotype = "None"
-    st.warning("⚠️ PCOS unlikely based on current data (does not meet Rotterdam criteria).")
-
-# --- Additional Alerts ---
-if homa_ir > 2.5:
-    st.error("🧪 Insulin Resistance detected (HOMA-IR > 2.5)")
-if tsh > 4.0:
-    st.warning("🧪 Consider further thyroid evaluation (TSH elevated)")
-if total_testosterone > 70 or dheas > 350:
-    st.warning("🧪 Possible biochemical hyperandrogenism – consider repeat or imaging")
-
-st.divider()
-
-# --- Treatment Plan ---
-st.subheader("💊 Treatment Plan Recommendation")
-treatment_notes = [
-    "Target 5–10% weight loss",
-    "Consider Myo-Inositol or Metformin",
-    "Optimize sleep, stress, and exercise routine",
-    "Recheck labs in 3–6 months",
-    "Supplement Vitamin D and B12 if low"
-]
-
-for item in treatment_notes:
-    st.markdown(f"- {item}")
-
-# --- Generate PDF Button ---
-if st.button("📥 Download PDF Report"):
-    filename = f"{name.replace(' ', '_')}_pcos_report.pdf"
-    today = date.today().strftime("%Y-%m-%d")
-    pdf_filename = f"PCOS_Report_{name.replace(' ', '_')}_{today}.pdf"
-    patient_data = {
-        "name": name,
-        "age": age,
-        "bmi": bmi,
-        "labs": [
-            {"name": "Total Testosterone", "value": total_testosterone, "unit": "ng/dL"},
-            {"name": "DHEAS", "value": dheas, "unit": "µg/dL"},
-            {"name": "Fasting Insulin", "value": fasting_insulin, "unit": "µIU/mL"},
-            {"name": "Fasting Glucose", "value": fasting_glucose, "unit": "mg/dL"},
-            {"name": "HOMA-IR", "value": homa_ir, "unit": ""},
-            {"name": "LH", "value": lh, "unit": "mIU/mL"},
-            {"name": "FSH", "value": fsh, "unit": "mIU/mL"},
-            {"name": "SHBG", "value": shbg, "unit": "nmol/L"},
-            {"name": "TSH", "value": tsh, "unit": "µIU/mL"},
-            {"name": "17-OHP", "value": seventeen_ohp, "unit": "ng/dL"},
-            {"name": "Vitamin D", "value": vitamin_d, "unit": "ng/mL"},
-            {"name": "Vitamin B12", "value": b12, "unit": "pg/mL"},
-            {"name": "Cholesterol", "value": cholesterol, "unit": "mg/dL"},
-            {"name": "LDL", "value": ldl, "unit": "mg/dL"},
-            {"name": "HDL", "value": hdl, "unit": "mg/dL"},
-            {"name": "Triglycerides", "value": triglycerides, "unit": "mg/dL"}
-        ]
+# --- Save Entry to Progress Log ---
+if name and weight:
+    log_df = pd.read_csv(DATA_FILE)
+    new_row = {
+        "Date": date.today().strftime("%Y-%m-%d"),
+        "Name": name,
+        "Weight": weight,
+        "BMI": bmi,
+        "Cycle Length": cycle_frequency,
+        "HOMA-IR": homa_ir,
+        "TSH": tsh
     }
-    create_pdf_report(pdf_filename, patient_data, "PCOS Likely" if num_positive >= 2 else "Unlikely", phenotype, treatment_notes)
-    with open(pdf_filename, "rb") as f:
-        st.download_button("📄 Download Your PCOS Report", f, file_name=pdf_filename, mime="application/pdf")
-    os.remove(pdf_filename)
+    log_df = pd.concat([log_df, pd.DataFrame([new_row])], ignore_index=True)
+    log_df.to_csv(DATA_FILE, index=False)
+
+# Ready for diagnostic and PDF generation logic...
