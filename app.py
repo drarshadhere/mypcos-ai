@@ -188,3 +188,5 @@ if paid:
         st.markdown("[📤 Share via WhatsApp](https://wa.me/?text=Your%20PCOS%20report%20is%20ready%20for%20download.)")
 else:
     st.info("🔒 Please confirm payment before generating the report.")
+
+
