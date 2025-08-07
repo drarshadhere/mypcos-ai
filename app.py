@@ -128,7 +128,7 @@ if name and weight:
     log_df = pd.concat([log_df, pd.DataFrame([new_row])], ignore_index=True)
     log_df.to_csv(DATA_FILE, index=False)
 
-# --- Placeholder for diagnosis (replace this with phenotype logic) ---
+# --- Placeholder for diagnosis ---
 diagnosis = "Polycystic Ovary Syndrome based on clinical, lab, and ultrasound findings."
 phenotype = "Phenotype A (Classic PCOS: Hyperandrogenism + Ovulatory Dysfunction + PCO)"
 
@@ -171,14 +171,14 @@ if paid:
         try:
             msg = EmailMessage()
             msg['Subject'] = 'Your PCOS Report from Clinics Northside'
-            msg['From'] = "your_email@example.com"
+            msg['From'] = st.secrets["email"]["sender"]
             msg['To'] = email
             msg.set_content("Your PCOS report is attached.")
             with open(filename, 'rb') as file:
                 msg.add_attachment(file.read(), maintype='application', subtype='pdf', filename=filename)
 
             with smtplib.SMTP_SSL('smtp.gmail.com', 465) as smtp:
-                smtp.login("your_email@example.com", "your_password")
+                smtp.login(st.secrets["email"]["sender"], st.secrets["email"]["password"])
                 smtp.send_message(msg)
             st.success("✅ Report emailed successfully.")
         except:
