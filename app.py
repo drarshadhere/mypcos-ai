@@ -134,4 +134,70 @@ if name and weight:
     log_df = pd.concat([log_df, pd.DataFrame([new_row])], ignore_index=True)
     log_df.to_csv(DATA_FILE, index=False)
 
-# Ready for diagnostic and PDF generation logic...
+# --- Diagnostic Logic ---
+st.subheader("📋 Diagnostic Summary")
+criteria = {
+    "Oligo/anovulation": (irregular_cycles == "Yes" or cycle_frequency < 9),
+    "Hyperandrogenism": (acne or hirsutism or alopecia or total_testosterone > 50 or dheas > 350),
+    "Polycystic ovaries": (pcos_ovaries == "Yes")
+}
+num_positive = sum(criteria.values())
+
+if num_positive >= 2:
+    st.success("✅ PCOS Likely (meets Rotterdam Criteria)")
+    if all(criteria.values()):
+        phenotype = "Phenotype A"
+    elif criteria["Oligo/anovulation"] and criteria["Hyperandrogenism"]:
+        phenotype = "Phenotype B"
+    elif criteria["Hyperandrogenism"] and criteria["Polycystic ovaries"]:
+        phenotype = "Phenotype C"
+    elif criteria["Oligo/anovulation"] and criteria["Polycystic ovaries"]:
+        phenotype = "Phenotype D"
+    else:
+        phenotype = "Unclassified"
+    st.write(f"### 📌 PCOS Phenotype: **{phenotype}**")
+    diagnosis = "PCOS Likely"
+else:
+    st.warning("⚠️ PCOS unlikely based on current data (does not meet Rotterdam criteria).")
+    diagnosis = "PCOS Unlikely"
+    phenotype = "Not applicable"
+
+# --- Payment and Report Generation ---
+st.divider()
+st.subheader("📥 Generate Report")
+st.markdown("Please complete payment of ₹299 before downloading the PDF.")
+st.markdown("[🔗 Pay via Razorpay](https://razorpay.me/@clinicsnorthside)")
+
+paid = st.checkbox("I have completed the payment")
+
+if paid:
+    treatment_notes = [
+        "Target 5–10% weight loss",
+        "Consider Myo-Inositol or Metformin",
+        "Optimize sleep, stress, and exercise routine",
+        "Recheck labs in 3–6 months",
+        "Supplement Vitamin D and B12 if low"
+    ]
+
+    if st.button("📄 Download PDF Report"):
+        patient_data = {
+            "name": name,
+            "age": age,
+            "bmi": bmi,
+            "labs": [
+                {"name": "HOMA-IR", "value": homa_ir, "unit": ""},
+                {"name": "TSH", "value": tsh, "unit": "µIU/mL"},
+                {"name": "Total Testosterone", "value": total_testosterone, "unit": "ng/dL"},
+                {"name": "DHEAS", "value": dheas, "unit": "µg/dL"},
+                {"name": "Vitamin D", "value": vitamin_d, "unit": "ng/mL"},
+                {"name": "Vitamin B12", "value": b12, "unit": "pg/mL"},
+            ]
+        }
+
+        filename = f"{name.replace(' ', '_')}_pcos_report.pdf"
+        create_pdf_report(filename, patient_data, diagnosis, phenotype, treatment_notes)
+        with open(filename, "rb") as f:
+            st.download_button("⬇️ Click to Download Report", f, file_name=filename)
+        os.remove(filename)
+else:
+    st.info("🔒 Please confirm payment before downloading the report.")
