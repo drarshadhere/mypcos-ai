@@ -1,15 +1,15 @@
-import os
-from generate_pdf import create_pdf_report
 import streamlit as st
-import datetime
+from datetime import date
+from generate_pdf import create_pdf_report
+import os
 
-# Page config
+# --- Page Configuration ---
 st.set_page_config(
     page_title="MyPCOS AI – Powered by Clinics Northside",
     layout="wide"
 )
 
-# --- STYLES ---
+# --- Styles ---
 st.markdown("""
     <style>
         .main {
@@ -24,12 +24,12 @@ st.markdown("""
     </style>
 """, unsafe_allow_html=True)
 
-# --- HEADER ---
+# --- Header ---
 st.title("MyPCOS AI – Powered by Clinics Northside™")
 st.markdown("A personalized diagnostic & care tool for PCOS reversal.")
 st.divider()
 
-# --- PATIENT DETAILS ---
+# --- Patient Details Sidebar ---
 with st.sidebar:
     st.header("🩺 Patient Details")
     name = st.text_input("Patient Name")
@@ -39,23 +39,23 @@ with st.sidebar:
     bmi = round(weight / ((height / 100) ** 2), 1) if height else 0
     st.write(f"**BMI:** {bmi}")
 
-# --- MENSTRUAL HISTORY ---
+# --- Menstrual History ---
 st.subheader("🩸 Menstrual History")
 irregular_cycles = st.selectbox("Irregular periods?", ["Yes", "No"])
 cycle_frequency = st.slider("Cycles per year", 0, 12, 6)
 prolonged_bleeding = st.selectbox("Prolonged bleeding (>8 days)?", ["Yes", "No"])
 
-# --- CLINICAL HYPERANDROGENISM ---
+# --- Clinical Hyperandrogenism ---
 st.subheader("🧑‍⚕️ Clinical Signs of Hyperandrogenism")
 acne = st.checkbox("Acne")
 hirsutism = st.checkbox("Hirsutism (facial/body hair)")
 alopecia = st.checkbox("Hair thinning or loss")
 
-# --- ULTRASOUND ---
+# --- Ultrasound Findings ---
 st.subheader("🩻 Ultrasound Findings")
 pcos_ovaries = st.selectbox("Polycystic ovaries seen on ultrasound?", ["Yes", "No", "Not Done"])
 
-# --- LAB INPUTS ---
+# --- Lab Inputs ---
 st.subheader("🧪 Lab Results")
 col1, col2, col3 = st.columns(3)
 
@@ -84,9 +84,34 @@ with col3:
 
 st.divider()
 
-# --- DIAGNOSTIC LOGIC ---
+# --- Payment Wall Before Analysis ---
 st.subheader("📋 Diagnostic Summary")
 
+if "payment_success" not in st.session_state:
+    st.session_state["payment_success"] = False
+
+if not st.session_state["payment_success"]:
+    st.info("🔒 Lab analysis and downloadable report are available after payment of ₹299.")
+
+    if st.button("🔍 Analyze & Download Report (Rs. 299)"):
+        st.markdown("""
+        ### 💳 Razorpay Secure Payment
+        Please complete payment of ₹299 using the link below:
+
+        👉 [Pay ₹299 Now](https://razorpay.me/@clinicsnorthside)
+        """, unsafe_allow_html=True)
+        st.markdown("> Once paid, check the confirmation box below.")
+
+    paid_confirm = st.checkbox("✅ I have completed the ₹299 payment")
+
+    if paid_confirm:
+        st.session_state["payment_success"] = True
+        st.success("✅ Payment confirmed! Analyzing your report...")
+        st.experimental_rerun()
+
+    st.stop()
+
+# --- Diagnosis ---
 criteria = {
     "Oligo/anovulation": (irregular_cycles == "Yes" or cycle_frequency < 9),
     "Hyperandrogenism": (acne or hirsutism or alopecia or total_testosterone > 50 or dheas > 350),
@@ -107,51 +132,11 @@ if num_positive >= 2:
     else:
         phenotype = "Unclassified"
     st.write(f"### 📌 PCOS Phenotype: **{phenotype}**")
-
-    # --- Labs for PDF ---
-    patient_data = {
-        "name": name,
-        "age": age,
-        "bmi": bmi,
-        "labs": [
-            {"name": "Total Testosterone", "value": total_testosterone, "unit": "ng/dL"},
-            {"name": "DHEAS", "value": dheas, "unit": "µg/dL"},
-            {"name": "Fasting Glucose", "value": fasting_glucose, "unit": "mg/dL"},
-            {"name": "Fasting Insulin", "value": fasting_insulin, "unit": "µIU/mL"},
-            {"name": "HOMA-IR", "value": homa_ir, "unit": ""},
-            {"name": "LH", "value": lh, "unit": "mIU/mL"},
-            {"name": "FSH", "value": fsh, "unit": "mIU/mL"},
-            {"name": "SHBG", "value": shbg, "unit": "nmol/L"},
-            {"name": "TSH", "value": tsh, "unit": "µIU/mL"},
-            {"name": "17-OHP", "value": seventeen_ohp, "unit": "ng/dL"},
-            {"name": "Vitamin D", "value": vitamin_d, "unit": "ng/mL"},
-            {"name": "Vitamin B12", "value": b12, "unit": "pg/mL"},
-            {"name": "Total Cholesterol", "value": cholesterol, "unit": "mg/dL"},
-            {"name": "LDL", "value": ldl, "unit": "mg/dL"},
-            {"name": "HDL", "value": hdl, "unit": "mg/dL"},
-            {"name": "Triglycerides", "value": triglycerides, "unit": "mg/dL"},
-        ]
-    }
-
-    treatment_notes = [
-        "Target 5–10% weight loss",
-        "Consider Myo-Inositol or Metformin",
-        "Optimize sleep, stress, and exercise routine",
-        "Recheck labs in 3–6 months",
-        "Supplement Vitamin D and B12 if low"
-    ]
-
-    if st.button("📥 Download PDF Report"):
-        filename = f"{name.replace(' ', '_')}_pcos_report.pdf"
-        create_pdf_report(filename, patient_data, "PCOS Likely", phenotype, treatment_notes)
-        with open(filename, "rb") as f:
-            st.download_button("📄 Click to Download Report", f, file_name=filename)
-        os.remove(filename)
-
 else:
+    phenotype = "None"
     st.warning("⚠️ PCOS unlikely based on current data (does not meet Rotterdam criteria).")
 
-# --- Alerts ---
+# --- Additional Alerts ---
 if homa_ir > 2.5:
     st.error("🧪 Insulin Resistance detected (HOMA-IR > 2.5)")
 if tsh > 4.0:
@@ -161,13 +146,48 @@ if total_testosterone > 70 or dheas > 350:
 
 st.divider()
 
-# --- Treatment Plan Section ---
+# --- Treatment Plan ---
 st.subheader("💊 Treatment Plan Recommendation")
-st.markdown("""
-This section provides:
-- Weight loss targets (based on BMI)
-- Inositol / Metformin recommendations
-- Lifestyle strategies
-- Vitamin D / B12 repletion
-- Downloadable PDF + WhatsApp coaching enrollment
-""")
+treatment_notes = [
+    "Target 5–10% weight loss",
+    "Consider Myo-Inositol or Metformin",
+    "Optimize sleep, stress, and exercise routine",
+    "Recheck labs in 3–6 months",
+    "Supplement Vitamin D and B12 if low"
+]
+
+for item in treatment_notes:
+    st.markdown(f"- {item}")
+
+# --- Generate PDF Button ---
+if st.button("📥 Download PDF Report"):
+    filename = f"{name.replace(' ', '_')}_pcos_report.pdf"
+    today = date.today().strftime("%Y-%m-%d")
+    pdf_filename = f"PCOS_Report_{name.replace(' ', '_')}_{today}.pdf"
+    patient_data = {
+        "name": name,
+        "age": age,
+        "bmi": bmi,
+        "labs": [
+            {"name": "Total Testosterone", "value": total_testosterone, "unit": "ng/dL"},
+            {"name": "DHEAS", "value": dheas, "unit": "µg/dL"},
+            {"name": "Fasting Insulin", "value": fasting_insulin, "unit": "µIU/mL"},
+            {"name": "Fasting Glucose", "value": fasting_glucose, "unit": "mg/dL"},
+            {"name": "HOMA-IR", "value": homa_ir, "unit": ""},
+            {"name": "LH", "value": lh, "unit": "mIU/mL"},
+            {"name": "FSH", "value": fsh, "unit": "mIU/mL"},
+            {"name": "SHBG", "value": shbg, "unit": "nmol/L"},
+            {"name": "TSH", "value": tsh, "unit": "µIU/mL"},
+            {"name": "17-OHP", "value": seventeen_ohp, "unit": "ng/dL"},
+            {"name": "Vitamin D", "value": vitamin_d, "unit": "ng/mL"},
+            {"name": "Vitamin B12", "value": b12, "unit": "pg/mL"},
+            {"name": "Cholesterol", "value": cholesterol, "unit": "mg/dL"},
+            {"name": "LDL", "value": ldl, "unit": "mg/dL"},
+            {"name": "HDL", "value": hdl, "unit": "mg/dL"},
+            {"name": "Triglycerides", "value": triglycerides, "unit": "mg/dL"}
+        ]
+    }
+    create_pdf_report(pdf_filename, patient_data, "PCOS Likely" if num_positive >= 2 else "Unlikely", phenotype, treatment_notes)
+    with open(pdf_filename, "rb") as f:
+        st.download_button("📄 Download Your PCOS Report", f, file_name=pdf_filename, mime="application/pdf")
+    os.remove(pdf_filename)
