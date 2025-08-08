@@ -1,3 +1,5 @@
 streamlit
 reportlab
 qrcode
+qrcode[pil]
+Pillow
