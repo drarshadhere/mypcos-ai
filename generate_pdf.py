@@ -1,14 +1,16 @@
 # generate_pdf.py
 from reportlab.platypus import (
-    SimpleDocTemplate, Paragraph, Spacer, Image, Table, TableStyle
+    BaseDocTemplate, Frame, PageTemplate,
+    Paragraph, Spacer, Image, Table, TableStyle
 )
 from reportlab.lib.pagesizes import A4
 from reportlab.lib.styles import getSampleStyleSheet, ParagraphStyle
 from reportlab.lib import colors
 from reportlab.lib.units import inch
+from reportlab.pdfgen.canvas import Canvas
 import datetime, os
 
-# ---------- helpers ----------
+# ============== helpers ==============
 
 def _fmt(x):
     if x is None: return "-"
@@ -37,7 +39,7 @@ def _maybe_logo(flow, logo_path):
     if not path: return
     try:
         img = Image(path)
-        img._restrictSize(2.8*inch, 0.9*inch)  # keep aspect
+        img._restrictSize(2.8*inch, 0.9*inch)  # keep aspect ratio
         flow.append(img); flow.append(Spacer(1, 8))
     except Exception:
         pass
@@ -80,7 +82,24 @@ def _bmi_note(bmi):
     else: cls = "Obese (Asian)"
     return f"BMI classification: {cls}. Weight management can improve ovulation and insulin sensitivity in PCOS."
 
-# ---------- main ----------
+# ============== footer callbacks ==============
+
+def _footer(canvas: Canvas, doc, footer_text="Clinics Northside | Confidential | www.clinicsnorthside.com"):
+    canvas.saveState()
+    w, h = A4
+    # thin line above footer
+    canvas.setStrokeColor(colors.lightgrey)
+    canvas.setLineWidth(0.3)
+    canvas.line(40, 30, w-40, 30)
+    # footer text (left)
+    canvas.setFont("Helvetica", 9)
+    canvas.setFillColor(colors.grey)
+    canvas.drawString(40, 18, footer_text)
+    # page number (right)
+    canvas.drawRightString(w-40, 18, f"Page {doc.page}")
+    canvas.restoreState()
+
+# ============== main ==============
 
 def create_pdf_report(
     filename,
@@ -92,31 +111,39 @@ def create_pdf_report(
     logo_path="assets/logo_clinics_northside.png",
     clinic_name="Clinics Northside",
     doctor_line="Dr. Arshad Mohammed, MD",
+    footer_text="Clinics Northside | Confidential | www.clinicsnorthside.com",
     whatsapp_link="https://wa.me/?text=I%20want%20to%20join%20the%20PCOS%20program",
-    whatsapp_qr_path=None  # optional PNG of your WA link
+    whatsapp_qr_path=None  # optional png path
 ):
     """
-    patient_data keys (optional ones are marked *):
+    patient_data keys:
       name, age, bmi,
-      criteria*: dict[str,bool]  # e.g. {"Oligo/anovulation": True, "Hyperandrogenism": True, "Polycystic ovaries": False}
-      alerts*:  list[str]
-      labs*:    list[ {name, value, unit, range*, reference*} ]
+      criteria* : dict[str,bool]
+      alerts*   : list[str]
+      labs*     : list[{name, value, unit, range*, reference*}]
       meal_plan*: list[{Day,Breakfast,Lunch,Snack,Dinner}]
       references*: list[str]
     """
-    # doc & styles
-    doc = SimpleDocTemplate(
-        filename, pagesize=A4,
-        rightMargin=40, leftMargin=40, topMargin=36, bottomMargin=36,
-        title="MyPCOS AI – Powered by Clinics Northside"
-    )
+
+    # Doc & styles
     styles = getSampleStyleSheet()
     styles.add(ParagraphStyle(name="Small", fontSize=9, leading=12))
     TitlePink = ParagraphStyle("TitlePink", parent=styles["Title"], textColor=colors.HexColor("#d63384"))
 
+    # Create a BaseDocTemplate with a repeating footer
+    doc = BaseDocTemplate(
+        filename, pagesize=A4,
+        rightMargin=40, leftMargin=40, topMargin=36, bottomMargin=50,
+        title="MyPCOS AI – Powered by Clinics Northside"
+    )
+    frame = Frame(doc.leftMargin, doc.bottomMargin, doc.width, doc.height-10, id='normal')
+    template = PageTemplate(id='with-footer', frames=[frame],
+                            onPage=lambda c, d: _footer(c, d, footer_text))
+    doc.addPageTemplates([template])
+
     flow = []
 
-    # header & brand
+    # Header & brand
     _maybe_logo(flow, logo_path)
     flow.append(Paragraph("MyPCOS AI – Powered by Clinics Northside™", TitlePink))
     flow.append(Paragraph(f"Date: {datetime.date.today().strftime('%B %d, %Y')}", styles["Normal"]))
@@ -128,7 +155,7 @@ def create_pdf_report(
     if note: flow.append(Paragraph(note, styles["Small"]))
     flow.append(Spacer(1, 8))
 
-    # diagnosis summary
+    # Diagnosis Summary
     flow.append(_h2("Diagnosis Summary", styles))
     flow.append(Paragraph(f"<b>Assessment:</b> {diagnosis}", styles["Normal"]))
     flow.append(Paragraph(f"<b>PCOS Phenotype:</b> {phenotype}", styles["Normal"]))
@@ -138,7 +165,7 @@ def create_pdf_report(
             styles["Small"]))
     flow.append(Spacer(1, 8))
 
-    # criteria evidence
+    # Evidence Summary
     criteria = patient_data.get("criteria", {})
     alerts = patient_data.get("alerts", [])
     if criteria or alerts:
@@ -153,10 +180,11 @@ def create_pdf_report(
             flow.append(Spacer(1, 6))
         if alerts:
             flow.append(Paragraph("<b>Clinical / Lab Alerts:</b>", styles["Normal"]))
-            for a in alerts: flow.append(Paragraph(f"• {_fmt(a)}", styles["Normal"]))
+            for a in alerts:
+                flow.append(Paragraph(f"• {_fmt(a)}", styles["Normal"]))
             flow.append(Spacer(1, 6))
 
-    # lab table (with ranges/evidence if provided)
+    # Lab Results
     labs = patient_data.get("labs", [])
     if labs:
         flow.append(_h2("Lab Results", styles))
@@ -177,39 +205,43 @@ def create_pdf_report(
         flow.append(_table(rows, widths=widths, align_right_cols=[1]))
         flow.append(Spacer(1, 8))
 
-    # nutrition plan (optional)
+    # Nutrition Plan (optional)
     meal_plan = patient_data.get("meal_plan", [])
     if meal_plan:
         flow.append(_h2("Nutrition Plan (7 days)", styles))
         plan = [["Day", "Breakfast", "Lunch", "Snack", "Dinner"]]
         for r in meal_plan:
-            plan.append([r.get("Day",""), r.get("Breakfast",""), r.get("Lunch",""), r.get("Snack",""), r.get("Dinner","")])
+            plan.append([
+                r.get("Day",""), r.get("Breakfast",""), r.get("Lunch",""),
+                r.get("Snack",""), r.get("Dinner","")
+            ])
         flow.append(_table(plan, widths=[45, 120, 120, 90, 120]))
         flow.append(Spacer(1, 6))
         flow.append(Paragraph(
-            "Low-GI, high-fiber focus. Portions can be adjusted to meet calorie targets and insulin-resistance goals.",
+            "Low-GI, high-fiber focus. Portions may be adjusted to meet calorie targets and insulin-resistance goals.",
             styles["Small"]))
         flow.append(Spacer(1, 6))
 
-    # treatment recommendations
+    # Treatment Recommendations
     if treatment_notes:
         flow.append(_h2("Treatment Recommendations", styles))
         for t in treatment_notes:
             flow.append(Paragraph(f"• {_fmt(t)}", styles["Normal"]))
         flow.append(Spacer(1, 6))
 
-    # next steps (auto)
+    # Next Steps (auto)
     follow_up = (datetime.date.today() + datetime.timedelta(days=90)).strftime("%b %d, %Y")
     flow.append(_h2("Next Steps", styles))
-    points = [
+    next_points = [
         "Recheck key labs (glucose/insulin, lipids, vitamin D) and cycles in 3 months.",
         "Prioritize sleep (7–8h), resistance training 2–3x/week, and stress reduction.",
         f"Suggested follow-up date: {follow_up}."
     ]
-    for p in points: flow.append(Paragraph(f"• {p}", styles["Normal"]))
+    for p in next_points:
+        flow.append(Paragraph(f"• {p}", styles["Normal"]))
     flow.append(Spacer(1, 8))
 
-    # references (optional)
+    # References (optional)
     refs = patient_data.get("references", [])
     if refs:
         flow.append(_h2("References", styles))
@@ -217,7 +249,7 @@ def create_pdf_report(
             flow.append(Paragraph(f"{i}. {r}", styles["Small"]))
         flow.append(Spacer(1, 6))
 
-    # footer
+    # Footer block (doctor + WhatsApp)
     flow.append(Paragraph(doctor_line, styles["Normal"]))
     flow.append(Paragraph(clinic_name, styles["Normal"]))
     if whatsapp_link:
@@ -227,4 +259,5 @@ def create_pdf_report(
         flow.append(Spacer(1, 8))
         _maybe_qr(flow, whatsapp_qr_path)
 
+    # Build
     doc.build(flow)
