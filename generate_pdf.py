@@ -1,14 +1,18 @@
 # generate_pdf.py
 from reportlab.platypus import (
     BaseDocTemplate, Frame, PageTemplate,
-    Paragraph, Spacer, Table, TableStyle
+    Paragraph, Spacer, Table, TableStyle, Image as RLImage
 )
 from reportlab.lib.pagesizes import A4
 from reportlab.lib.styles import getSampleStyleSheet, ParagraphStyle
 from reportlab.lib import colors
 from reportlab.lib.units import inch
 from reportlab.pdfgen.canvas import Canvas
-import datetime, os
+import datetime, os, io
+
+# NEW: for QR
+import qrcode
+from PIL import Image as PILImage
 
 # =================== helpers ===================
 
@@ -57,7 +61,34 @@ def _table(data, widths=None, align_right_cols=None):
     t.setStyle(TableStyle(style))
     return t
 
+# ---- QR helper (NEW) ----
+def _qr_flowable(text, size_inch=1.8):
+    """
+    Create a ReportLab Image flowable containing a QR code for 'text'.
+    """
+    if not text:
+        return None
+    # Build QR (high error correction for reliable scanning)
+    qr = qrcode.QRCode(
+        version=None, box_size=10, border=2,
+        error_correction=qrcode.constants.ERROR_CORRECT_H
+    )
+    qr.add_data(text)
+    qr.make(fit=True)
+    img: PILImage.Image = qr.make_image(fill_color="black", back_color="white").convert("RGB")
+
+    # BytesIO → ReportLab Image
+    buf = io.BytesIO()
+    img.save(buf, format="PNG")
+    buf.seek(0)
+    flow_img = RLImage(buf)
+    # size in inches (keeps aspect ratio)
+    flow_img._restrictSize(size_inch * inch, size_inch * inch)
+    return flow_img
+
 # ============== header / footer drawing ==============
+
+NEW_TITLE = "MyPCOS AI – Doctor-Reviewed Reversal Tool by Clinics Northside™"
 
 def _draw_header(canvas: Canvas, doc, logo_path, title_color="#d63384"):
     canvas.saveState()
@@ -87,7 +118,7 @@ def _draw_header(canvas: Canvas, doc, logo_path, title_color="#d63384"):
     # title (center)
     canvas.setFont("Helvetica-Bold", 13)
     canvas.setFillColor(colors.HexColor(title_color))
-    canvas.drawCentredString(w/2, top-18, "MyPCOS AI – Powered by Clinics Northside™")
+    canvas.drawCentredString(w/2, top-18, NEW_TITLE)
     canvas.restoreState()
 
 def _draw_footer(canvas: Canvas, doc, footer_text="Clinics Northside | Confidential | www.clinicsnorthside.com"):
@@ -119,12 +150,13 @@ def create_pdf_report(
     doctor_line="Dr. Arshad Mohammed, MD",
     footer_text="Clinics Northside | Confidential | www.clinicsnorthside.com",
     whatsapp_link="https://wa.me/?text=I%20want%20to%20join%20the%20PCOS%20program",
-    whatsapp_qr_path=None    # optional PNG path
+    add_qr=True,                   # NEW: toggle inline QR generation
+    qr_size_inch=1.8               # NEW: QR size control
 ):
     """
     patient_data expected keys (optional ones marked *):
       name, age, bmi,
-      criteria*: dict[str,bool]             # {"Oligo/anovulation": True, ...}
+      criteria*: dict[str,bool]
       alerts*  : list[str]
       labs*    : list[{name,value,unit,range*,reference*}]
       meal_plan*: list[{Day,Breakfast,Lunch,Snack,Dinner}]
@@ -134,7 +166,6 @@ def create_pdf_report(
     # Styles
     styles = getSampleStyleSheet()
     styles.add(ParagraphStyle(name="Small", fontSize=9, leading=12))
-    TitlePink = ParagraphStyle("TitlePink", parent=styles["Title"], textColor=colors.HexColor("#d63384"))
 
     # Document with header+footer on every page
     top_band = 45
@@ -144,7 +175,7 @@ def create_pdf_report(
         pagesize=A4,
         leftMargin=40, rightMargin=40,
         topMargin=40 + top_band, bottomMargin=bottom_band + 10,
-        title="MyPCOS AI – Powered by Clinics Northside"
+        title=NEW_TITLE
     )
     frame = Frame(doc.leftMargin, doc.bottomMargin, doc.width, doc.height, id='body')
     page_tmpl = PageTemplate(
@@ -256,111 +287,19 @@ def create_pdf_report(
             flow.append(Paragraph(f"{i}. {r}", styles["Small"]))
         flow.append(Spacer(1, 6))
 
-    # Closing block
-    flow.append(Paragraph(doctor_line, styles["Normal"]))
-    flow.append(Paragraph(clinic_name, styles["Normal"]))
+    # Closing block + WhatsApp CTA + QR
+    flow.append(Paragraph(patient_data.get("doctor_line", "Dr. Arshad Mohammed, MD"), styles["Normal"]))
+    flow.append(Paragraph(patient_data.get("clinic_name", "Clinics Northside"), styles["Normal"]))
     if whatsapp_link:
         flow.append(Spacer(1, 4))
         flow.append(Paragraph(
             f"<a href='{whatsapp_link}'>📲 Chat on WhatsApp to book an appointment for video consultation with Dr. Arshad Mohammed, MD for further management and personalized treatment for PCOS and weight loss</a>",
             styles["Small"]
         ))
-    if whatsapp_qr_path:
-        from reportlab.platypus import Image as PLImage
-        path = _find_file(whatsapp_qr_path, ["assets/whatsapp_qr.png", "whatsapp_qr.png"])
-        if path:
-            flow.append(Spacer(1, 6))
-            img = PLImage(path)
-            img._restrictSize(2.0*inch, 2.0*inch)
-            flow.append(img)
+        if add_qr:
+            qr_img = _qr_flowable(whatsapp_link, size_inch=qr_size_inch)
+            if qr_img:
+                flow.append(Spacer(1, 6))
+                flow.append(qr_img)
 
     doc.build(flow)
-
-# =================== meal plan one-pager ===================
-
-def create_mealplan_pdf(
-    filename,
-    *,
-    patient_name="",
-    age=None,
-    bmi=None,
-    meal_plan=None,                 # list of dicts: Day, Breakfast, Lunch, Snack, Dinner
-    calories_target=None,           # optional int
-    logo_path="assets/logo_clinics_northside.png",
-    footer_text="Clinics Northside | Confidential | www.clinicsnorthside.com",
-    whatsapp_link=None,
-    whatsapp_qr_path=None           # optional PNG path
-):
-    """
-    One-page, print-friendly Meal Plan PDF with header/footer.
-    """
-    meal_plan = meal_plan or []
-
-    styles = getSampleStyleSheet()
-    styles.add(ParagraphStyle(name="Small", fontSize=9, leading=12))
-    H2 = styles["Heading2"]
-
-    top_band = 45
-    bottom_band = 55
-    doc = BaseDocTemplate(
-        filename,
-        pagesize=A4,
-        leftMargin=40, rightMargin=40,
-        topMargin=40 + top_band, bottomMargin=bottom_band + 10,
-        title="MyPCOS AI – Meal Plan"
-    )
-    frame = Frame(doc.leftMargin, doc.bottomMargin, doc.width, doc.height, id="body")
-    page_tmpl = PageTemplate(
-        id="with-bands",
-        frames=[frame],
-        onPage=lambda c, d: (_draw_header(c, d, logo_path), _draw_footer(c, d, footer_text)),
-    )
-    doc.addPageTemplates([page_tmpl])
-
-    flow = []
-    today = datetime.date.today().strftime("%b %d, %Y")
-    bits = [f"Date: {today}"]
-    if patient_name: bits.append(f"Patient: {patient_name}")
-    if age is not None: bits.append(f"Age: {age}")
-    if bmi is not None: bits.append(f"BMI: {bmi}")
-    flow.append(Paragraph(" | ".join(bits), styles["Small"]))
-    if calories_target:
-        flow.append(Paragraph(f"Calorie target: <b>{calories_target} kcal/day</b>", styles["Small"]))
-    flow.append(Spacer(1, 6))
-
-    flow.append(Paragraph("Nutrition Plan (7 days)", H2))
-    rows = [["Day", "Breakfast", "Lunch", "Snack", "Dinner"]]
-    for r in meal_plan:
-        rows.append([r.get("Day",""), r.get("Breakfast",""), r.get("Lunch",""), r.get("Snack",""), r.get("Dinner","")])
-    tbl = Table(rows, colWidths=[45, 120, 120, 90, 120], hAlign="LEFT")
-    tbl.setStyle(TableStyle([
-        ("BACKGROUND", (0, 0), (-1, 0), colors.lightgrey),
-        ("GRID", (0, 0), (-1, -1), 0.5, colors.grey),
-        ("FONTNAME", (0, 0), (-1, 0), "Helvetica-Bold"),
-        ("VALIGN", (0, 0), (-1, -1), "TOP"),
-    ]))
-    flow.append(tbl)
-    flow.append(Spacer(1, 8))
-    flow.append(Paragraph(
-        "Notes: Focus on low-GI, high-fiber foods. Adjust portions to meet targets and individual tolerance. Pair carbohydrates with protein/fat to blunt glycemic spikes.",
-        styles["Small"]
-    ))
-
-    if whatsapp_link:
-        flow.append(Spacer(1, 6))
-        flow.append(Paragraph(
-            f"<a href='{whatsapp_link}'>📲 Chat on WhatsApp to book an appointment for video consultation with Dr. Arshad Mohammed, MD for further management and personalized treatment for PCOS and weight loss</a>",
-            styles["Small"]
-        ))
-    if whatsapp_qr_path:
-        from reportlab.platypus import Image as PLImage
-        path = _find_file(whatsapp_qr_path, ["assets/whatsapp_qr.png", "whatsapp_qr.png"])
-        if path:
-            flow.append(Spacer(1, 6))
-            img = PLImage(path)
-            img._restrictSize(1.8 * inch, 1.8 * inch)
-            flow.append(img)
-
-    doc.build(flow)
-
-
