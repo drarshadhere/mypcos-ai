@@ -272,3 +272,118 @@ def create_pdf_report(
             flow.append(img)
 
     doc.build(flow)
+# === One-pager: Meal Plan Only PDF ==========================================
+from reportlab.platypus import BaseDocTemplate, Frame, PageTemplate, Paragraph, Spacer, Table, TableStyle
+from reportlab.lib.pagesizes import A4
+from reportlab.lib.styles import getSampleStyleSheet, ParagraphStyle
+from reportlab.lib import colors
+from reportlab.lib.units import inch
+from reportlab.pdfgen.canvas import Canvas
+import datetime
+
+def create_mealplan_pdf(
+    filename,
+    *,
+    patient_name="",
+    age=None,
+    bmi=None,
+    meal_plan=None,                 # list of dicts: Day, Breakfast, Lunch, Snack, Dinner
+    calories_target=None,           # optional int
+    logo_path="assets/logo_clinics_northside.png",
+    footer_text="Clinics Northside | Confidential | www.clinicsnorthside.com",
+    whatsapp_link=None,
+    whatsapp_qr_path=None           # optional PNG path
+):
+    """
+    Build a one-page, print-friendly Meal Plan PDF.
+    Uses the same header/footer as the main report.
+    """
+    meal_plan = meal_plan or []
+
+    # styles
+    styles = getSampleStyleSheet()
+    styles.add(ParagraphStyle(name="Small", fontSize=9, leading=12))
+    styles.add(ParagraphStyle(name="Tiny", fontSize=8, leading=10))
+    H2 = styles["Heading2"]
+
+    # Page bands
+    top_band = 45
+    bottom_band = 55
+
+    doc = BaseDocTemplate(
+        filename,
+        pagesize=A4,
+        leftMargin=40, rightMargin=40,
+        topMargin=40 + top_band, bottomMargin=bottom_band + 10,
+        title="MyPCOS AI – Meal Plan"
+    )
+
+    frame = Frame(doc.leftMargin, doc.bottomMargin, doc.width, doc.height, id="body")
+    page_tmpl = PageTemplate(
+        id="with-bands",
+        frames=[frame],
+        onPage=lambda c, d: (_draw_header(c, d, logo_path), _draw_footer(c, d, footer_text)),
+    )
+    doc.addPageTemplates([page_tmpl])
+
+    # build
+    flow = []
+
+    # Header text
+    today = datetime.date.today().strftime("%b %d, %Y")
+    heading_bits = [f"Date: {today}"]
+    if patient_name: heading_bits.append(f"Patient: {patient_name}")
+    if age is not None: heading_bits.append(f"Age: {age}")
+    if bmi is not None: heading_bits.append(f"BMI: {bmi}")
+    flow.append(Paragraph(" | ".join(heading_bits), styles["Small"]))
+    if calories_target:
+        flow.append(Paragraph(f"Calorie target: <b>{calories_target} kcal/day</b>", styles["Small"]))
+    flow.append(Spacer(1, 6))
+
+    # Title
+    flow.append(Paragraph("Nutrition Plan (7 days)", H2))
+
+    # Table
+    table_rows = [["Day", "Breakfast", "Lunch", "Snack", "Dinner"]]
+    for r in meal_plan:
+        table_rows.append([
+            r.get("Day", ""),
+            r.get("Breakfast", ""),
+            r.get("Lunch", ""),
+            r.get("Snack", ""),
+            r.get("Dinner", ""),
+        ])
+
+    tbl = Table(table_rows, colWidths=[45, 120, 120, 90, 120], hAlign="LEFT")
+    tbl.setStyle(TableStyle([
+        ("BACKGROUND", (0, 0), (-1, 0), colors.lightgrey),
+        ("GRID", (0, 0), (-1, -1), 0.5, colors.grey),
+        ("FONTNAME", (0, 0), (-1, 0), "Helvetica-Bold"),
+        ("VALIGN", (0, 0), (-1, -1), "TOP"),
+    ]))
+    flow.append(tbl)
+    flow.append(Spacer(1, 8))
+
+    # Notes
+    flow.append(Paragraph(
+        "Notes: Focus on low-GI, high-fiber foods. Adjust portions to meet targets and individual tolerance. "
+        "Pair carbohydrates with protein/fat to blunt glycemic spikes.",
+        styles["Small"]
+    ))
+
+    # WhatsApp CTA / QR (optional)
+    if whatsapp_link:
+        flow.append(Spacer(1, 6))
+        flow.append(Paragraph(f"<a href='{whatsapp_link}'>📲 Join Coaching on WhatsApp</a>", styles["Small"]))
+    if whatsapp_qr_path:
+        from reportlab.platypus import Image as PLImage
+        path = _find_file(whatsapp_qr_path, ["assets/whatsapp_qr.png", "whatsapp_qr.png"])
+        if path:
+            flow.append(Spacer(1, 6))
+            img = PLImage(path)
+            img._restrictSize(1.8 * inch, 1.8 * inch)
+            flow.append(img)
+
+    # Build
+    doc.build(flow)
+
